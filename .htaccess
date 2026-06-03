@@ -1,0 +1,20 @@
+RewriteEngine On
+
+# Force HTTPS (uncomment in production)
+# RewriteCond %{HTTPS} off
+# RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Route /api/* to api/*.php
+RewriteRule ^api/products$   api/products.php   [L,QSA]
+RewriteRule ^api/categories$ api/categories.php  [L,QSA]
+RewriteRule ^api/orders$     api/orders.php      [L,QSA]
+
+# Security: Block direct access to config
+<Files "config.php">
+    Require all denied
+</Files>
+
+# Security: Block .git, .env, etc.
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
