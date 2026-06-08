@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>AR Furniture Viewer - Full Color Palette</title>
+    <title>AR Furniture Viewer - Desktop Fix</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
 
@@ -80,6 +80,7 @@
             border-radius: 10px;
             text-align: center;
             z-index: 200;
+            width: 80%;
         }
 
         #loading {
@@ -223,7 +224,6 @@
             display: none;
         }
 
-
         
         #measureLabel {
             position: absolute;
@@ -346,13 +346,13 @@
     </div>
 
     <div id="loading">Loading 3D Experience...</div>
-    <div id="desktop-msg">AR not supported on this device.<br>Use mouse to rotate/zoom.</div>
+    <div id="desktop-msg">AR not supported on this device.<br><b>Click Screen Once to Place & Enable Controls</b></div>
     
     <div id="modeBadge">Viewer Mode</div>
     <div id="instructions">
-        1. <b>Pinch</b> to Resize.<br>
+        1. <b>Click</b> to Place.<br>
         2. <b>Drag</b> to Rotate.<br>
-        3. <b>Tap Screen</b> to Place.
+        3. <b>Scroll</b> to Resize.
     </div>
     
     <div id="measureLabel">0.00m</div>
@@ -451,6 +451,7 @@
         let reticle;
         let activeModel = null;
         let isPlaced = false;
+        let hasMoved = false; // Track if dragging vs clicking
         
         // Interaction vars
         let touchStartPos = { x: 0, y: 0 };
@@ -491,7 +492,14 @@
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-      
+            // NEW: Add click listener for Desktop Mode
+            renderer.domElement.addEventListener('click', () => {
+                // If not in AR, and not dragging (just a click), place the model
+                if (!renderer.xr.isPresenting && !hasMoved && !measureMode) {
+                    onSelect();
+                }
+            });
+
             const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 2); 
             light.position.set(0.5, 1, 0.25);
             scene.add(light);
@@ -663,6 +671,7 @@
         let isDragging = false;
         function onMouseDown(e) { 
             isDragging = true; 
+            hasMoved = false; // Reset movement tracker
             touchStartPos = { x: e.clientX, y: e.clientY }; 
         }
         function onMouseMove(e) {
@@ -670,6 +679,8 @@
                 const deltaX = e.clientX - touchStartPos.x;
                 activeModel.rotation.y += deltaX * 0.01;
                 touchStartPos.x = e.clientX;
+                // If we moved significantly, mark as dragging
+                if(Math.abs(deltaX) > 2) hasMoved = true;
             }
         }
         function onMouseUp() { isDragging = false; }
@@ -687,15 +698,27 @@
                 return;
             }
             if (!activeModel) return;
-            if (!isPlaced && reticle.visible) {
-                placeModel();
+            
+            if (!isPlaced) {
+                // Check if we are in AR mode and have a floor hit
+                if (renderer.xr.isPresenting && reticle.visible) {
+                    placeModel();
+                } 
+                // If NOT in AR (e.g. Desktop Viewer), allow placement
+                else if (!renderer.xr.isPresenting) {
+                    placeModel();
+                }
             }
         }
 
         function placeModel() {
             isPlaced = true;
-            activeModel.position.copy(reticle.position);
-            activeModel.quaternion.copy(reticle.quaternion);
+            // Only snap to reticle if we are actually in AR mode with a hit
+            if (renderer.xr.isPresenting && reticle.visible) {
+                activeModel.position.copy(reticle.position);
+                activeModel.quaternion.copy(reticle.quaternion);
+            }
+            // In desktop mode, we just keep the position where it is currently floating
             uiReticle.classList.add('placed');
             updateUIState();
         }
@@ -721,53 +744,26 @@
 
       
         function changeColor() {
-            console.log("Change color button clicked");
             const modal = document.getElementById('colorModal');
             if (modal) {
                 modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
-                console.log("Color modal toggled to:", modal.style.display);
-            } else {
-                console.error("Color modal not found");
             }
         }
 
         window.applyColor = function(color) {
-            console.log("Applying color:", color);
-            if (!activeModel) {
-                console.warn("No active model to apply color to");
-                return;
-            }
+            if (!activeModel) return;
             
             activeModel.traverse((child) => {
                 if (child.isMesh && child.material) {
-                    try {
-                        // Ensure material exists and is valid
-                        if (child.material.color) {
-                            // Convert hex color to THREE.Color if needed
-                            const threeColor = new THREE.Color(color);
-                            child.material.color = threeColor;
-                            
-                            // Reset material properties to ensure color change is visible
-                            child.material.needsUpdate = true;
-                            
-                            // If it's a standard material, ensure it's not emissive
-                            if (child.material.emissive) {
-                                child.material.emissive = new THREE.Color(0x000000);
-                            }
-                            
-                            console.log("Applied color to mesh:", child.name || "unnamed mesh");
-                        }
-                    } catch (e) {
-                        console.error("Error applying color to mesh:", e);
-                    }
+                    child.material.map = null;
+                    child.material.color.set(color);
+                    child.material.emissive.set(0x000000);
+                    child.material.needsUpdate = true;
                 }
             });
             
-          
             const modal = document.getElementById('colorModal');
             if (modal) modal.style.display = 'none';
-            
-            // Show feedback
             showToast("Color applied successfully!");
         };
 
@@ -779,23 +775,22 @@
         window.applyMaterial = function(type) {
             if (!activeModel) return;
             activeModel.traverse((child) => {
-                if (child.isMesh) {
-                    if (child.material) {
-                        if (type === 'wood') {
-                            child.material.color = new THREE.Color('#8B4513');
-                            child.material.roughness = 0.8;
-                            child.material.metalness = 0.1;
-                        } else if (type === 'fabric') {
-                            child.material.color = new THREE.Color('#e0e0e0');
-                            child.material.roughness = 1.0;
-                            child.material.metalness = 0.0;
-                        } else if (type === 'metal') {
-                            child.material.color = new THREE.Color('#708090');
-                            child.material.roughness = 0.2;
-                            child.material.metalness = 0.9;
-                        }
-                        child.material.needsUpdate = true;
+                if (child.isMesh && child.material) {
+                    child.material.map = null;
+                    if (type === 'wood') {
+                        child.material.color.set('#8B4513');
+                        child.material.roughness = 0.8;
+                        child.material.metalness = 0.1;
+                    } else if (type === 'fabric') {
+                        child.material.color.set('#e0e0e0');
+                        child.material.roughness = 1.0;
+                        child.material.metalness = 0.0;
+                    } else if (type === 'metal') {
+                        child.material.color.set('#708090');
+                        child.material.roughness = 0.2;
+                        child.material.metalness = 0.9;
                     }
+                    child.material.needsUpdate = true;
                 }
             });
             document.getElementById('customizeModal').style.display = 'none';
@@ -868,10 +863,8 @@
             const overlay = document.getElementById('scanOverlay');
             overlay.style.display = 'flex';
             
-            // Get current model type
             const currentModel = document.getElementById('modelSelect').value;
             
-            // Define model-specific properties
             const modelData = {
                 duck: { 
                     minSpace: 4, 
@@ -905,7 +898,6 @@
                 }
             };
             
-     
             const data = modelData[currentModel];
             const detectedSpace = (Math.random() * (data.maxSpace - data.minSpace) + data.minSpace).toFixed(1);
             const lighting = data.light;
@@ -952,7 +944,7 @@
                 document.getElementById('repositionBtn').textContent = "Cancel";
                 if(!measureMode) {
                     document.getElementById('instructions').style.opacity = '1';
-                    document.getElementById('instructions').innerHTML = "1. <b>Pinch</b> to Resize.<br>2. <b>Drag</b> to Rotate.<br>3. <b>Tap Screen</b> to Place.";
+                    document.getElementById('instructions').innerHTML = "1. <b>Click</b> to Place.<br>2. <b>Drag</b> to Rotate.<br>3. <b>Scroll</b> to Resize.";
                 }
             }
         }
